@@ -4,9 +4,17 @@ public class Location {
     private int id;
     private String cityName;
     private String country;
+    private String countryCode;
     private double latitude;
     private double longitude;
     private String description;
+    private Long population;
+    private String timezone;
+    public String getTimezone() { return timezone; }
+    public void setTimezone(String timezone) { this.timezone = timezone; }
+
+    public Long getPopulation() { return population; }
+    public void setPopulation(Long population) { this.population = population; }
 
     public Location() {
     }
@@ -43,6 +51,9 @@ public class Location {
     public void setCountry(String country) {
         this.country = country;
     }
+
+    public String getCountryCode() { return countryCode; }
+    public void setCountryCode(String countryCode) { this.countryCode = countryCode; }
 
     public double getLatitude() {
         return latitude;

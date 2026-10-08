@@ -6,9 +6,13 @@
 
 # Build directories
 build/
+**/map-cache/
 bin/
 target/
 out/
+**/security/server-private.key
+client/sources.txt
+server/sources.txt
 
 # IDE files
 .idea/

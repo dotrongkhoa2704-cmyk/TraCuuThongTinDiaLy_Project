@@ -1,20 +1,30 @@
 package server;
 
-import java.io.PrintWriter;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class ClientManager {
-    private static final ConcurrentHashMap<Integer, PrintWriter> clientWriters = new ConcurrentHashMap<>();
+public final class ClientManager {
 
-    public static void addClient(int userId, PrintWriter writer) {
-        clientWriters.put(userId, writer);
+    private static final ConcurrentHashMap<Integer, ClientSession>
+            sessions = new ConcurrentHashMap<>();
+
+    private ClientManager() {
     }
 
-    public static void removeClient(int userId) {
-        clientWriters.remove(userId);
+    public static void addClient(
+            int userId,
+            ClientSession session
+    ) {
+        sessions.put(userId, session);
     }
 
-    public static PrintWriter getWriter(int userId) {
-        return clientWriters.get(userId);
+    public static void removeClient(
+            int userId,
+            ClientSession session
+    ) {
+        sessions.remove(userId, session);
+    }
+
+    public static ClientSession getSession(int userId) {
+        return sessions.get(userId);
     }
 }

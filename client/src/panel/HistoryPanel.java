@@ -5,7 +5,9 @@ import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 import model.Message;
 import model.User;
+import model.HistoryEntry;
 import network.ClientSocketManager;
+import util.VietnameseText;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -36,7 +38,7 @@ public class HistoryPanel extends JPanel {
         topPanel.add(refreshButton);
         add(topPanel, BorderLayout.NORTH);
 
-        String[] columns = {"STT", "Từ khóa tìm kiếm"};
+        String[] columns = {"Số thứ tự", "Từ khóa tìm kiếm", "Loại tra cứu"};
         tableModel = new DefaultTableModel(columns, 0) {
             @Override
             public boolean isCellEditable(int row, int column) { return false; }
@@ -48,36 +50,49 @@ public class HistoryPanel extends JPanel {
     }
 
     public void loadHistory() {
+        if (!refreshButton.isEnabled()) return;
         refreshButton.setEnabled(false);
         new SwingWorker<Message, Void>() {
             @Override
             protected Message doInBackground() throws Exception {
                 JsonObject data = new JsonObject();
-                data.addProperty("userId", currentUser.getId());
                 return socketManager.sendRequest(new Message("GET_HISTORY", data));
             }
 
             @Override
             protected void done() {
+                if (!HistoryPanel.this.isDisplayable()) return;
                 try {
                     Message response = get();
+                    requireResponse(response, "GET_HISTORY_RESPONSE");
                     if (response != null && "GET_HISTORY_RESPONSE".equals(response.getAction())) {
-                        java.lang.reflect.Type listType = new TypeToken<List<String>>(){}.getType();
-                        List<String> history = gson.fromJson(gson.toJsonTree(response.getData()), listType);
+                        java.lang.reflect.Type listType = new TypeToken<List<HistoryEntry>>(){}.getType();
+                        List<HistoryEntry> history = gson.fromJson(gson.toJsonTree(response.getData()), listType);
                         tableModel.setRowCount(0);
                         if (history != null) {
                             int stt = 1;
-                            for (String kw : history) {
-                                tableModel.addRow(new Object[]{stt++, kw});
+                            for (HistoryEntry entry : history) {
+                                tableModel.addRow(new Object[]{stt++, entry.getKeyword(),
+                                        "quoc_gia".equals(entry.getType()) ? "Quốc gia" : "Thành phố"});
                             }
                         }
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
+                    JOptionPane.showMessageDialog(HistoryPanel.this, "Không tải được lịch sử tra cứu: " + VietnameseText.errorMessage(e),
+                            "Lỗi tải dữ liệu", JOptionPane.ERROR_MESSAGE);
                 } finally {
                     refreshButton.setEnabled(true);
                 }
             }
         }.execute();
+    }
+
+    private static void requireResponse(Message response, String action) throws java.io.IOException {
+        if (response == null) throw new java.io.IOException("Máy chủ không trả lời.");
+        if ("ERROR".equals(response.getAction())) {
+            throw new java.io.IOException("Máy chủ báo lỗi: " + String.valueOf(response.getData()));
+        }
+        if (!action.equals(response.getAction())) throw new java.io.IOException("Phản hồi của máy chủ không hợp lệ.");
     }
 }

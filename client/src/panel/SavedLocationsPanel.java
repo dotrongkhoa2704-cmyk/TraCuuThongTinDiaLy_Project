@@ -7,6 +7,7 @@ import model.Location;
 import model.Message;
 import model.User;
 import network.ClientSocketManager;
+import util.VietnameseText;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
@@ -21,6 +22,7 @@ public class SavedLocationsPanel extends JPanel {
     private DefaultTableModel tableModel;
     private JButton refreshButton;
     private JButton deleteButton;
+    private boolean busy;
 
     public SavedLocationsPanel(User user, ClientSocketManager socketManager) {
         this.currentUser = user;
@@ -36,14 +38,14 @@ public class SavedLocationsPanel extends JPanel {
         // Top bar
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         refreshButton = new JButton("Làm mới");
-        deleteButton = new JButton("Xóa địa điểm chọn");
+        deleteButton = new JButton("Xóa địa điểm đã chọn");
         deleteButton.setEnabled(false);
         topPanel.add(refreshButton);
         topPanel.add(deleteButton);
         add(topPanel, BorderLayout.NORTH);
 
         // Center table
-        String[] columns = {"ID", "Tên địa điểm", "Vĩ độ", "Kinh độ", "Ghi chú"};
+        String[] columns = {"Mã địa điểm", "Tên địa điểm", "Vĩ độ", "Kinh độ", "Ghi chú"};
         tableModel = new DefaultTableModel(columns, 0) {
             @Override
             public boolean isCellEditable(int row, int column) { return false; }
@@ -51,7 +53,7 @@ public class SavedLocationsPanel extends JPanel {
         locationTable = new JTable(tableModel);
         locationTable.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
-                deleteButton.setEnabled(locationTable.getSelectedRow() != -1);
+                deleteButton.setEnabled(!busy && locationTable.getSelectedRow() != -1);
             }
         });
         add(new JScrollPane(locationTable), BorderLayout.CENTER);
@@ -61,19 +63,21 @@ public class SavedLocationsPanel extends JPanel {
     }
 
     private void loadLocations() {
-        refreshButton.setEnabled(false);
+        if (busy) return;
+        setBusy(true);
         new SwingWorker<Message, Void>() {
             @Override
             protected Message doInBackground() throws Exception {
                 JsonObject data = new JsonObject();
-                data.addProperty("userId", currentUser.getId());
                 return socketManager.sendRequest(new Message("GET_SAVED_LOCATIONS", data));
             }
 
             @Override
             protected void done() {
+                if (!SavedLocationsPanel.this.isDisplayable()) return;
                 try {
                     Message response = get();
+                    requireResponse(response, "GET_SAVED_LOCATIONS_RESPONSE");
                     if (response != null && "GET_SAVED_LOCATIONS_RESPONSE".equals(response.getAction())) {
                         java.lang.reflect.Type listType = new TypeToken<List<Location>>(){}.getType();
                         List<Location> locations = gson.fromJson(gson.toJsonTree(response.getData()), listType);
@@ -81,22 +85,26 @@ public class SavedLocationsPanel extends JPanel {
                         if (locations != null) {
                             for (Location loc : locations) {
                                 tableModel.addRow(new Object[]{
-                                        loc.getId(), loc.getCityName(), loc.getLatitude(), loc.getLongitude(), loc.getDescription()
+                                        loc.getId(), VietnameseText.location(loc.getCityName()),
+                                        String.format(VietnameseText.LOCALE, "%.5f°", loc.getLatitude()),
+                                        String.format(VietnameseText.LOCALE, "%.5f°", loc.getLongitude()), loc.getDescription()
                                 });
                             }
                         }
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
-                    JOptionPane.showMessageDialog(SavedLocationsPanel.this, "Lỗi khi tải danh sách địa điểm.");
+                    JOptionPane.showMessageDialog(SavedLocationsPanel.this, "Không tải được địa điểm đã lưu: " + VietnameseText.errorMessage(e),
+                            "Lỗi tải dữ liệu", JOptionPane.ERROR_MESSAGE);
                 } finally {
-                    refreshButton.setEnabled(true);
+                    setBusy(false);
                 }
             }
         }.execute();
     }
 
     private void deleteLocation() {
+        if (busy) return;
         int row = locationTable.getSelectedRow();
         if (row == -1) return;
 
@@ -106,29 +114,50 @@ public class SavedLocationsPanel extends JPanel {
         int confirm = JOptionPane.showConfirmDialog(this, "Bạn có chắc muốn xóa '" + name + "'?", "Xác nhận xóa", JOptionPane.YES_NO_OPTION);
         if (confirm != JOptionPane.YES_OPTION) return;
 
+        setBusy(true);
         new SwingWorker<Message, Void>() {
             @Override
             protected Message doInBackground() throws Exception {
                 JsonObject data = new JsonObject();
                 data.addProperty("id", id);
-                data.addProperty("userId", currentUser.getId());
                 return socketManager.sendRequest(new Message("DELETE_LOCATION", data));
             }
 
             @Override
             protected void done() {
+                if (!SavedLocationsPanel.this.isDisplayable()) return;
                 try {
                     Message response = get();
+                    requireResponse(response, "DELETE_LOCATION_RESPONSE");
                     if (response != null && "DELETE_LOCATION_RESPONSE".equals(response.getAction()) && (Boolean)response.getData()) {
                         tableModel.removeRow(row);
-                        JOptionPane.showMessageDialog(SavedLocationsPanel.this, "Đã xóa thành công.");
+                        JOptionPane.showMessageDialog(SavedLocationsPanel.this, "Đã xóa địa điểm.", "Thông báo", JOptionPane.INFORMATION_MESSAGE);
                     } else {
-                        JOptionPane.showMessageDialog(SavedLocationsPanel.this, "Xóa thất bại.");
+                        JOptionPane.showMessageDialog(SavedLocationsPanel.this, "Không xóa được địa điểm.", "Lỗi xóa địa điểm", JOptionPane.ERROR_MESSAGE);
                     }
                 } catch (Exception e) {
                     e.printStackTrace();
+                    JOptionPane.showMessageDialog(SavedLocationsPanel.this, "Không xóa được địa điểm: " + VietnameseText.errorMessage(e),
+                            "Lỗi xóa địa điểm", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    setBusy(false);
                 }
             }
         }.execute();
+    }
+
+    private void setBusy(boolean value) {
+        busy = value;
+        refreshButton.setEnabled(!value);
+        locationTable.setEnabled(!value);
+        deleteButton.setEnabled(!value && locationTable.getSelectedRow() != -1);
+    }
+
+    private static void requireResponse(Message response, String action) throws java.io.IOException {
+        if (response == null) throw new java.io.IOException("Máy chủ không trả lời.");
+        if ("ERROR".equals(response.getAction())) {
+            throw new java.io.IOException("Máy chủ báo lỗi: " + String.valueOf(response.getData()));
+        }
+        if (!action.equals(response.getAction())) throw new java.io.IOException("Phản hồi của máy chủ không hợp lệ.");
     }
 }

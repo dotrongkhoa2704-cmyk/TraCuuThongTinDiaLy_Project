@@ -35,7 +35,7 @@ public class CountryDAO {
                 }
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không tra cứu được quốc gia trong cơ sở dữ liệu (mã SQL: " + e.getSQLState() + ").");
         }
         return list;
     }

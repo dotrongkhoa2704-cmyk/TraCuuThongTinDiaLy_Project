@@ -39,6 +39,10 @@ CREATE TABLE `dia_diem_da_luu` (
     `kinh_do` DECIMAL(11, 8),
     `ghi_chu` TEXT,
     `ngay_luu` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    `vi_do_key` DECIMAL(10, 8) GENERATED ALWAYS AS (IFNULL(`vi_do`, 99)) STORED,
+    `kinh_do_key` DECIMAL(11, 8) GENERATED ALWAYS AS (IFNULL(`kinh_do`, 999)) STORED,
+    UNIQUE KEY `uq_saved_location` (`id_tai_khoan`, `ten_dia_diem`, `vi_do_key`, `kinh_do_key`),
+    KEY `idx_saved_user_date` (`id_tai_khoan`, `ngay_luu`),
     FOREIGN KEY (`id_tai_khoan`) REFERENCES `tai_khoan`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -50,7 +54,8 @@ CREATE TABLE `khach_san` (
     `gia_mot_dem` DECIMAL(10, 2),
     `don_vi_tien` VARCHAR(10) DEFAULT 'VND',
     `danh_gia` DECIMAL(2, 1),
-    `mo_ta` TEXT
+    `mo_ta` TEXT,
+    KEY `idx_hotel_city_rating` (`ten_thanh_pho`, `danh_gia`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `lich_su_tra_cuu` (
@@ -59,15 +64,20 @@ CREATE TABLE `lich_su_tra_cuu` (
     `tu_khoa_tim_kiem` VARCHAR(255) NOT NULL,
     `loai_tra_cuu` ENUM('thanh_pho', 'quoc_gia') DEFAULT 'thanh_pho',
     `thoi_gian_tra_cuu` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    KEY `idx_history_user_date` (`id_tai_khoan`, `thoi_gian_tra_cuu`),
     FOREIGN KEY (`id_tai_khoan`) REFERENCES `tai_khoan`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `bo_nho_dem_thoi_tiet` (
     `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `khoa_bo_nho_dem` VARCHAR(255) NOT NULL UNIQUE,
-    `du_lieu_json` LONGTEXT NOT NULL,
-    `thoi_gian_tao` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    `thoi_gian_het_han` DATETIME NOT NULL
+    `cache_key` VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,
+    `data_json` LONGTEXT NOT NULL,
+    `type` VARCHAR(32) NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `expires_at` DATETIME NOT NULL,
+    UNIQUE KEY `uq_cache_key` (`cache_key`),
+    KEY `idx_cache_expires` (`expires_at`),
+    KEY `idx_cache_type_expires` (`type`, `expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE `theo_doi_thoi_tiet` (
@@ -76,17 +86,20 @@ CREATE TABLE `theo_doi_thoi_tiet` (
     `ten_dia_diem` VARCHAR(255) NOT NULL,
     `vi_do` DECIMAL(10, 8),
     `kinh_do` DECIMAL(11, 8),
-    `dieu_kien_canh_bao` VARCHAR(200) DEFAULT 'thoi_tiet_xau',
+    `dieu_kien_canh_bao` VARCHAR(200) NOT NULL DEFAULT 'thoi_tiet_xau',
     `ngay_dang_ky` DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_weather_subscription` (`id_tai_khoan`, `ten_dia_diem`, `dieu_kien_canh_bao`),
+    KEY `idx_subscription_user_date` (`id_tai_khoan`, `ngay_dang_ky`),
     FOREIGN KEY (`id_tai_khoan`) REFERENCES `tai_khoan`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ===================== DU LIEU MAU =====================
 
 INSERT INTO `tai_khoan` (`id`, `ten_dang_nhap`, `mat_khau`, `email`, `ho_ten`) VALUES
-(1, 'nguyenvana', '123456', 'nguyenvana@gmail.com', 'Nguyen Van A'),
-(2, 'phunggiahuy', '123456', 'phunggiahuy@gmail.com', 'Phung Gia Huy'),
-(3, 'tranvanb', '123456', 'tranvanb@gmail.com', 'Tran Van B');
+-- Mật khẩu mẫu: Demo12345!; mỗi tài khoản có salt PBKDF2 riêng.
+(1, 'nguyenvana', '310000:q3uNpsnHsV8Uz5ZdQJd/Qg==:+JAs9eBmgvPfV8rvaID7e0gmrCWJsNPuQdwkUoQfgUM=', 'nguyenvana@gmail.com', 'Nguyen Van A'),
+(2, 'phunggiahuy', '310000:HvLwaE1fQjszBzCaC7Ij+g==:x7SVPRAKn6o/bcZoxhkWa08sM0Dwsf8eIHZgNA+al4E=', 'phunggiahuy@gmail.com', 'Phung Gia Huy'),
+(3, 'tranvanb', '310000:/PIb6HFDCOW+aWjEmG6Epw==:prGcg8rzqs+nSNM9C5VHfafaQIRRK4rJvParAFir6zs=', 'tranvanb@gmail.com', 'Tran Van B');
 
 INSERT INTO `quoc_gia` (`ten_quoc_gia`, `ma_quoc_gia`, `thu_do`, `don_vi_tien_te`, `ngon_ngu`, `url_quoc_ky`, `quoc_gia_lien_ke`, `diem_du_lich_noi_bat`) VALUES
 ('Viet Nam', 'VN', 'Ha Noi', 'Dong Viet Nam (VND)', 'Tieng Viet', 'https://flagcdn.com/w320/vn.png', 'Trung Quoc, Lao, Campuchia', 'Ha Long Bay, Hoi An, Sapa, Nha Trang, Phu Quoc'),

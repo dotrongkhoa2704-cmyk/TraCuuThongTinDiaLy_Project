@@ -1,216 +1,313 @@
 package panel;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
+import com.google.gson.*;
 import com.google.gson.reflect.TypeToken;
-import model.Hotel;
 import model.Location;
 import model.Message;
 import model.User;
 import model.WeatherData;
 import network.ClientSocketManager;
-
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.util.ArrayList;
 import java.util.List;
+import util.VietnameseText;
+import util.InputValidation;
 
 public class CitySearchPanel extends JPanel {
     private final User currentUser;
     private final ClientSocketManager socketManager;
-    private final Gson gson;
-    private JTextField searchField;
-    private JButton searchButton;
-    private JTable resultTable;
-    private DefaultTableModel tableModel;
-    private JTextArea detailArea;
-    private JButton saveButton;
+    private final Gson gson = new Gson();
+    private final JTextField searchField = new JTextField(25);
+    private final JButton searchButton = new JButton("Tra cứu");
+    private final JButton saveButton = new JButton("Lưu địa điểm");
+    private final JTextArea detailArea = new JTextArea(12, 50);
+    private final NearbyPlacesPanel nearbyPlaces = new NearbyPlacesPanel();
+    private final CityMapPanel cityMap = new CityMapPanel();
+    private final DefaultTableModel tableModel = new DefaultTableModel(
+            new String[]{"Tên thành phố", "Quốc gia", "Tỉnh / vùng", "Vĩ độ", "Kinh độ", "Dân số"}, 0) {
+        @Override public boolean isCellEditable(int row, int column) { return false; }
+    };
+    private final JTable resultTable = new JTable(tableModel);
+    private List<Location> results = new ArrayList<>();
+    private long selectionVersion;
+    private boolean saving;
+    private boolean detailLoading;
+    private final JButton refreshWeather = new JButton("Cập nhật thời tiết");
+    private final JLabel currentTime = new JLabel("Chọn thành phố để xem giờ địa phương");
+    private final Timer clockTimer = new Timer(1000, e -> updateClock());
+    private final Timer weatherTimer = new Timer(5 * 60 * 1000, e -> {
+        if (isShowing() && !detailLoading && searchButton.isEnabled() && selectedCity() != null) showDetails();
+    });
+    private static final java.time.format.DateTimeFormatter TIME_FORMAT =
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss dd/MM/yyyy (XXX)");
 
     public CitySearchPanel(User user, ClientSocketManager socketManager) {
         this.currentUser = user;
         this.socketManager = socketManager;
-        this.gson = new Gson();
-        buildLayout();
-    }
-
-    private void buildLayout() {
         setLayout(new BorderLayout());
-
-        // Top search bar
-        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        searchField = new JTextField(25);
-        searchButton = new JButton("Tra cứu");
-        topPanel.add(new JLabel("Tên thành phố: "));
-        topPanel.add(searchField);
-        topPanel.add(searchButton);
-        add(topPanel, BorderLayout.NORTH);
-
-        // Center result table
-        String[] columns = {"ID", "Tên địa điểm", "Vĩ độ", "Kinh độ"};
-        tableModel = new DefaultTableModel(columns, 0) {
-            @Override
-            public boolean isCellEditable(int row, int column) { return false; }
-        };
-        resultTable = new JTable(tableModel);
-        resultTable.getSelectionModel().addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting() && resultTable.getSelectedRow() != -1) {
-                showDetails(resultTable.getSelectedRow());
-            }
-        });
-        add(new JScrollPane(resultTable), BorderLayout.CENTER);
-
-        // Bottom detail area
-        JPanel bottomPanel = new JPanel(new BorderLayout());
-        detailArea = new JTextArea(8, 50);
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        top.add(new JLabel("Tên thành phố:"));
+        top.add(searchField);
+        top.add(searchButton);
+        add(top, BorderLayout.NORTH);
+        resultTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         detailArea.setEditable(false);
-        bottomPanel.add(new JScrollPane(detailArea), BorderLayout.CENTER);
-
-        saveButton = new JButton("Lưu địa điểm này");
+        detailArea.setLineWrap(true);
+        detailArea.setWrapStyleWord(true);
+        JPanel bottom = new JPanel(new BorderLayout());
+        bottom.setBorder(BorderFactory.createTitledBorder("Thông tin thành phố, thời tiết và địa điểm liên quan"));
+        bottom.add(currentTime, BorderLayout.NORTH);
+        JTabbedPane detailsTabs = new JTabbedPane();
+        detailsTabs.addTab("Thành phố và thời tiết", new JScrollPane(detailArea));
+        JScrollPane placesScroll = new JScrollPane(nearbyPlaces);
+        placesScroll.getVerticalScrollBar().setUnitIncrement(16);
+        detailsTabs.addTab("Địa điểm lân cận", placesScroll);
+        detailsTabs.addTab("Bản đồ", cityMap);
+        bottom.add(detailsTabs, BorderLayout.CENTER);
+        JPanel buttons = new JPanel();
         saveButton.setEnabled(false);
-        saveButton.addActionListener(e -> saveLocation());
-        JPanel buttonPanel = new JPanel();
-        buttonPanel.add(saveButton);
-        bottomPanel.add(buttonPanel, BorderLayout.SOUTH);
-
-        add(bottomPanel, BorderLayout.SOUTH);
-
+        buttons.add(saveButton);
+        refreshWeather.setEnabled(false);
+        refreshWeather.addActionListener(e -> { if (!detailLoading && selectedCity() != null) showDetails(); });
+        buttons.add(refreshWeather);
+        bottom.add(buttons, BorderLayout.SOUTH);
+        JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
+                new JScrollPane(resultTable), bottom);
+        split.setResizeWeight(0.45);
+        split.setDividerLocation(220);
+        split.setContinuousLayout(true);
+        add(split, BorderLayout.CENTER);
         searchButton.addActionListener(e -> search());
+        searchField.addActionListener(e -> search());
+        saveButton.addActionListener(e -> saveLocation());
+        resultTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) showDetails();
+        });
     }
 
     private void search() {
-        String keyword = searchField.getText().trim();
-        if (keyword.isEmpty()) return;
-        
-        saveHistory(keyword);
-
+        if (!searchButton.isEnabled()) return;
+        final String keyword;
+        try {
+            keyword = InputValidation.keyword(searchField.getText(), "Tên thành phố", 2, 200);
+        } catch (InputValidation.ValidationException exception) {
+            JOptionPane.showMessageDialog(this, exception.getMessage(), "Dữ liệu không hợp lệ", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        selectionVersion++;
+        cityMap.clear();
+        results = new ArrayList<>();
+        tableModel.setRowCount(0);
+        saveButton.setEnabled(false);
+        refreshWeather.setEnabled(false);
+        updateClock();
+        searchButton.setEnabled(false);
+        detailArea.setText("Đang tra cứu thành phố...");
+        nearbyPlaces.showMessage("Đang tra cứu thành phố...");
         new SwingWorker<Message, Void>() {
-            @Override
-            protected Message doInBackground() throws Exception {
+            @Override protected Message doInBackground() throws Exception {
                 JsonObject data = new JsonObject();
                 data.addProperty("keyword", keyword);
-                return socketManager.sendRequest(new Message("SEARCH_LOCATION", data));
+                Message response = socketManager.sendRequest(new Message("SEARCH_LOCATION", data));
+                if (response != null && "SEARCH_LOCATION_RESPONSE".equals(response.getAction())) {
+                    JsonObject history = new JsonObject();
+                    history.addProperty("keyword", keyword);
+                    history.addProperty("type", "thanh_pho");
+                    try {
+                        socketManager.sendRequest(new Message("SAVE_HISTORY", history));
+                    } catch (Exception e) {
+                        System.err.println("Không lưu được lịch sử thành phố: " + VietnameseText.errorMessage(e));
+                    }
+                }
+                return response;
             }
-            @Override
-            protected void done() {
+            @Override protected void done() {
+                if (!CitySearchPanel.this.isDisplayable()) return;
                 try {
                     Message response = get();
-                    if (response != null && "SEARCH_LOCATION_RESPONSE".equals(response.getAction())) {
-                        java.lang.reflect.Type listType = new TypeToken<List<Location>>(){}.getType();
-                        List<Location> locations = gson.fromJson(gson.toJsonTree(response.getData()), listType);
-                        tableModel.setRowCount(0);
-                        if (locations != null) {
-                            for (Location loc : locations) {
-                                tableModel.addRow(new Object[]{loc.getId(), loc.getCityName(), loc.getLatitude(), loc.getLongitude()});
-                            }
-                        }
-                        detailArea.setText("");
-                        saveButton.setEnabled(false);
+                    requireResponse(response, "SEARCH_LOCATION_RESPONSE");
+                    List<Location> found = gson.fromJson(gson.toJsonTree(response.getData()),
+                            new TypeToken<List<Location>>(){}.getType());
+                    results = found == null ? new ArrayList<>() : found;
+                    for (Location city : results) {
+                        tableModel.addRow(new Object[]{VietnameseText.city(city.getCityName(), city.getCountryCode()),
+                                VietnameseText.country(city.getCountry(), city.getCountryCode()),
+                                VietnameseText.city(city.getDescription(), city.getCountryCode()),
+                                String.format(VietnameseText.LOCALE, "%.5f°", city.getLatitude()),
+                                String.format(VietnameseText.LOCALE, "%.5f°", city.getLongitude()), population(city)});
                     }
+                    detailArea.setText(results.isEmpty() ? "Không tìm thấy thành phố phù hợp."
+                            : "Chọn một thành phố để xem thời tiết và địa điểm lân cận.");
+                    nearbyPlaces.showMessage(results.isEmpty() ? "Không tìm thấy thành phố phù hợp."
+                            : "Chọn thành phố để xem địa điểm lân cận.");
+                    if (!results.isEmpty()) resultTable.setRowSelectionInterval(0, 0);
                 } catch (Exception e) {
-                    e.printStackTrace();
-                }
+                    detailArea.setText("Tra cứu thất bại: " + errorMessage(e));
+                    nearbyPlaces.showMessage("Tra cứu thất bại: " + errorMessage(e));
+                } finally { searchButton.setEnabled(true); }
             }
         }.execute();
     }
 
-    private void saveHistory(String keyword) {
-        new SwingWorker<Void, Void>() {
-            @Override
-            protected Void doInBackground() throws Exception {
-                JsonObject data = new JsonObject();
-                data.addProperty("userId", currentUser.getId());
-                data.addProperty("keyword", keyword);
-                socketManager.sendRequest(new Message("SAVE_HISTORY", data));
-                return null;
-            }
-        }.execute();
+    private Location selectedCity() {
+        int row = resultTable.getSelectedRow();
+        if (row < 0) return null;
+        int index = resultTable.convertRowIndexToModel(row);
+        return index < results.size() ? results.get(index) : null;
     }
 
-    private void showDetails(int row) {
-        String cityName = (String) tableModel.getValueAt(row, 1);
-        saveButton.setEnabled(true);
-        detailArea.setText("Đang tải thông tin thời tiết và khách sạn cho " + cityName + "...");
-
-        new SwingWorker<String, Void>() {
-            @Override
-            protected String doInBackground() throws Exception {
-                JsonObject weatherReq = new JsonObject();
-                weatherReq.addProperty("cityName", cityName);
-                Message weatherRes = socketManager.sendRequest(new Message("GET_WEATHER", weatherReq));
-
-                JsonObject hotelReq = new JsonObject();
-                hotelReq.addProperty("cityName", cityName);
-                Message hotelRes = socketManager.sendRequest(new Message("GET_HOTELS", hotelReq));
-
-                StringBuilder sb = new StringBuilder();
-                if (weatherRes != null && "GET_WEATHER_RESPONSE".equals(weatherRes.getAction())) {
-                    WeatherData weather = gson.fromJson(gson.toJsonTree(weatherRes.getData()), WeatherData.class);
-                    sb.append("--- THỜI TIẾT ---\n");
-                    sb.append(String.format("Nhiệt độ: %.1f°C\nĐộ ẩm: %d%%\nGió: %.1fm/s\nMô tả: %s\n\n",
-                            weather.getTemp(), weather.getHumidity(), weather.getWindSpeed(), weather.getDescription()));
-                }
-                
-                if (hotelRes != null && "GET_HOTELS_RESPONSE".equals(hotelRes.getAction())) {
-                    java.lang.reflect.Type listType = new TypeToken<List<Hotel>>(){}.getType();
-                    List<Hotel> hotels = gson.fromJson(gson.toJsonTree(hotelRes.getData()), listType);
-                    sb.append("--- GỢI Ý KHÁCH SẠN ---\n");
-                    if (hotels != null && !hotels.isEmpty()) {
-                        for (Hotel h : hotels) {
-                            sb.append(String.format("- %s (%.1f*): %.0f %s\n  %s\n",
-                                    h.getTenKhachSan(), h.getDanhGia(), h.getGiaMotDem(), h.getDonViTien(), h.getDiaChi()));
-                        }
-                    } else {
-                        sb.append("Không có khách sạn nào trong CSDL cho thành phố này.\n");
-                    }
-                }
-                return sb.toString();
+    private void showDetails() {
+        long version = ++selectionVersion;
+        Location city = selectedCity();
+        saveButton.setEnabled(city != null && !saving);
+        refreshWeather.setEnabled(false);
+        updateClock();
+        detailLoading = city != null;
+        if (city == null) { cityMap.clear(); return; }
+        cityMap.showCity(VietnameseText.city(city.getCityName(), city.getCountryCode()), city.getLatitude(), city.getLongitude());
+        nearbyPlaces.showMessage("Đang tải địa điểm lân cận...");
+        String header = String.format(VietnameseText.LOCALE, "Thành phố: %s\nQuốc gia: %s\nTỉnh / vùng: %s\n"
+                        + "Tọa độ: %.5f, %.5f\nDân số (GeoNames): %s\n\n",
+                VietnameseText.city(city.getCityName(), city.getCountryCode()), VietnameseText.country(city.getCountry(), city.getCountryCode()),
+                VietnameseText.city(city.getDescription(), city.getCountryCode()),
+                city.getLatitude(), city.getLongitude(), population(city));
+        detailArea.setText(header + "Đang tải thời tiết và địa điểm lân cận...");
+        new SwingWorker<JsonObject, Void>() {
+            @Override protected JsonObject doInBackground() throws Exception {
+                JsonObject request = new JsonObject();
+                request.addProperty("id", city.getId());
+                Message response = socketManager.sendRequest(new Message("GET_CITY_DETAILS", request));
+                requireResponse(response, "GET_CITY_DETAILS_RESPONSE");
+                return gson.toJsonTree(response.getData()).getAsJsonObject();
             }
-            @Override
-            protected void done() {
+            @Override protected void done() {
+                if (!CitySearchPanel.this.isDisplayable() || version != selectionVersion) return;
                 try {
-                    detailArea.setText(get());
+                JsonObject data = get();
+                StringBuilder text = new StringBuilder(header);
+                text.append("--- THỜI TIẾT HIỆN TẠI (OpenWeather) ---\n");
+                if (data.has("weather")) {
+                    WeatherData w = gson.fromJson(data.get("weather"), WeatherData.class);
+                    text.append(String.format(VietnameseText.LOCALE, "Nhiệt độ: %.1f°C\nĐộ ẩm: %d%%\nGió: %.1f m/s\n"
+                                    + "Mô tả: %s\nThời điểm dữ liệu OpenWeather: %s\n",
+                            w.getTemp(), w.getHumidity(), w.getWindSpeed(), VietnameseText.weather(w.getDescription()), weatherTime(w.getUpdatedAt(), city)));
+                    text.append("Lần lấy dữ liệu gần nhất: ").append(TIME_FORMAT.format(java.time.ZonedDateTime.now(cityZone(city)))).append('\n');
+                    text.append(w.isFromCache() ? "Nguồn: bộ nhớ đệm còn hiệu lực trên máy chủ.\n" : "Nguồn: vừa lấy từ OpenWeather.\n");
+                    text.append("Tự cập nhật mỗi 5 phút khi đang xem tab.\n");
+                } else { text.append(data.get("weatherError").getAsString()).append('\n'); }
+                text.append("\nXem ảnh và thông tin địa điểm ở tab Địa điểm lân cận.");
+                detailArea.setText(text.toString());
+                nearbyPlaces.showPlaces(data);
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    detailArea.setText(header + "Không tải được chi tiết: " + errorMessage(e));
+                    nearbyPlaces.showMessage("Không tải được địa điểm: " + errorMessage(e));
                 }
+                detailArea.setCaretPosition(0);
+                detailLoading = false;
+                refreshWeather.setEnabled(selectedCity() != null && searchButton.isEnabled());
             }
         }.execute();
     }
 
     private void saveLocation() {
-        int row = resultTable.getSelectedRow();
-        if (row == -1) return;
-        
-        String name = (String) tableModel.getValueAt(row, 1);
-        double lat = (Double) tableModel.getValueAt(row, 2);
-        double lng = (Double) tableModel.getValueAt(row, 3);
-        String note = JOptionPane.showInputDialog(this, "Nhập ghi chú cho địa điểm này:", "Lưu địa điểm", JOptionPane.PLAIN_MESSAGE);
-        
-        if (note == null) return; // Cancelled
-
+        Location city = selectedCity();
+        if (city == null || saving) return;
+        final String name;
+        try {
+            InputValidation.coordinates(city.getLatitude(), city.getLongitude());
+            String cityName = InputValidation.keyword(city.getCityName(), "Tên thành phố", 1, 255);
+            String country = InputValidation.keyword(city.getCountry(), "Tên quốc gia", 1, 255);
+            name = InputValidation.keyword(cityName + ", " + country, "Tên địa điểm", 1, 255);
+        } catch (InputValidation.ValidationException exception) {
+            JOptionPane.showMessageDialog(this, exception.getMessage(), "Dữ liệu địa điểm không hợp lệ", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        String enteredNote = JOptionPane.showInputDialog(this, "Nhập ghi chú cho địa điểm này:",
+                "Lưu địa điểm", JOptionPane.PLAIN_MESSAGE);
+        if (enteredNote == null) return;
+        final String note;
+        try {
+            note = InputValidation.optionalText(enteredNote, "Ghi chú", 2000);
+        } catch (InputValidation.ValidationException exception) {
+            JOptionPane.showMessageDialog(this, exception.getMessage(), "Ghi chú không hợp lệ", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        saving = true;
+        saveButton.setEnabled(false);
         new SwingWorker<Message, Void>() {
-            @Override
-            protected Message doInBackground() throws Exception {
+            @Override protected Message doInBackground() throws Exception {
                 JsonObject data = new JsonObject();
-                data.addProperty("userId", currentUser.getId());
                 data.addProperty("name", name);
-                data.addProperty("lat", lat);
-                data.addProperty("lng", lng);
+                data.addProperty("lat", city.getLatitude());
+                data.addProperty("lng", city.getLongitude());
                 data.addProperty("note", note);
                 return socketManager.sendRequest(new Message("SAVE_LOCATION", data));
             }
-            @Override
-            protected void done() {
+            @Override protected void done() {
+                if (!CitySearchPanel.this.isDisplayable()) return;
                 try {
                     Message response = get();
-                    if (response != null && "SAVE_LOCATION_RESPONSE".equals(response.getAction()) && (Boolean)response.getData()) {
-                        JOptionPane.showMessageDialog(CitySearchPanel.this, "Đã lưu địa điểm thành công!");
-                    } else {
-                        JOptionPane.showMessageDialog(CitySearchPanel.this, "Không thể lưu địa điểm.");
-                    }
+                    requireResponse(response, "SAVE_LOCATION_RESPONSE");
+                    boolean success = gson.toJsonTree(response.getData()).getAsBoolean();
+                    JOptionPane.showMessageDialog(CitySearchPanel.this,
+                            success ? "Đã lưu địa điểm thành công!" : "Không thể lưu địa điểm.");
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    JOptionPane.showMessageDialog(CitySearchPanel.this, "Lỗi lưu địa điểm: " + errorMessage(e));
+                } finally {
+                    saving = false;
+                    saveButton.setEnabled(selectedCity() != null);
                 }
             }
         }.execute();
+    }
+
+    private static String population(Location city) {
+        return city.getPopulation() == null ? "Chưa có dữ liệu" : String.format(VietnameseText.LOCALE, "%,d người", city.getPopulation());
+    }
+
+    private void updateClock() {
+        Location city = selectedCity();
+        if (city == null) { currentTime.setText("Chọn thành phố để xem giờ địa phương"); return; }
+        boolean known = city.getTimezone() != null && !city.getTimezone().isBlank();
+        currentTime.setText((known ? "Giờ hiện tại tại " + VietnameseText.city(city.getCityName(), city.getCountryCode()) : "Giờ hiện tại (UTC; chưa có múi giờ thành phố)")
+                + ": " + TIME_FORMAT.format(java.time.ZonedDateTime.now(cityZone(city))));
+    }
+
+    private static java.time.ZoneId cityZone(Location city) {
+        try { return java.time.ZoneId.of(city.getTimezone()); }
+        catch (Exception e) { return java.time.ZoneOffset.UTC; }
+    }
+
+    private static String weatherTime(String timestamp, Location city) {
+        try { return TIME_FORMAT.format(java.time.Instant.parse(timestamp).atZone(cityZone(city))); }
+        catch (Exception e) { return timestamp; }
+    }
+
+    @Override public void addNotify() {
+        super.addNotify();
+        clockTimer.start();
+        weatherTimer.start();
+    }
+
+    @Override public void removeNotify() {
+        selectionVersion++;
+        detailLoading = false;
+        clockTimer.stop();
+        weatherTimer.stop();
+        super.removeNotify();
+    }
+
+    private static void requireResponse(Message response, String action) throws java.io.IOException {
+        if (response == null) throw new java.io.IOException("Máy chủ không trả lời.");
+        if (!action.equals(response.getAction())) {
+            throw new java.io.IOException("ERROR".equals(response.getAction())
+                    ? String.valueOf(response.getData()) : "Phản hồi máy chủ không hợp lệ.");
+        }
+    }
+
+    private static String errorMessage(Exception error) {
+        return VietnameseText.errorMessage(error);
     }
 }

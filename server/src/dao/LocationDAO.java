@@ -44,7 +44,7 @@ public class LocationDAO {
                 }
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không tra cứu được địa điểm đã lưu (mã SQL: " + e.getSQLState() + ").");
         }
 
         return locations;
@@ -60,7 +60,7 @@ public class LocationDAO {
             statement.setString(5, note);
             return statement.executeUpdate() > 0;
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không lưu được địa điểm (mã SQL: " + e.getSQLState() + ").");
             return false;
         }
     }
@@ -83,7 +83,7 @@ public class LocationDAO {
                 }
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không đọc được danh sách địa điểm đã lưu (mã SQL: " + e.getSQLState() + ").");
         }
         return locations;
     }
@@ -95,7 +95,7 @@ public class LocationDAO {
             statement.setInt(2, userId);
             return statement.executeUpdate() > 0;
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không xóa được địa điểm (mã SQL: " + e.getSQLState() + ").");
             return false;
         }
     }

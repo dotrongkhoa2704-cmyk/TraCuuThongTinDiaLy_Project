@@ -19,16 +19,23 @@ public class WeatherSubscriptionDAO {
             "DELETE FROM theo_doi_thoi_tiet WHERE id = ? AND id_tai_khoan = ?";
 
     public boolean subscribe(int userId, String location, double lat, double lng, String condition) {
+        return subscribe(userId, location, Double.valueOf(lat), Double.valueOf(lng), condition);
+    }
+
+    /** A subscription created from a city name has no coordinates until geocoding succeeds. */
+    public boolean subscribe(int userId, String location, Double lat, Double lng, String condition) {
         try (Connection conn = DBConnection.getConnection();
              PreparedStatement ps = conn.prepareStatement(SUBSCRIBE_SQL)) {
             ps.setInt(1, userId);
             ps.setString(2, location);
-            ps.setDouble(3, lat);
-            ps.setDouble(4, lng);
+            if (lat == null) ps.setNull(3, Types.DOUBLE);
+            else ps.setDouble(3, lat);
+            if (lng == null) ps.setNull(4, Types.DOUBLE);
+            else ps.setDouble(4, lng);
             ps.setString(5, condition);
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không lưu được đăng ký theo dõi thời tiết (mã SQL: " + e.getSQLState() + ").");
             return false;
         }
     }
@@ -44,14 +51,14 @@ public class WeatherSubscriptionDAO {
                             String.valueOf(rs.getInt("id")),
                             String.valueOf(rs.getInt("id_tai_khoan")),
                             rs.getString("ten_dia_diem"),
-                            String.valueOf(rs.getDouble("vi_do")),
-                            String.valueOf(rs.getDouble("kinh_do")),
+                            rs.getString("vi_do"),
+                            rs.getString("kinh_do"),
                             rs.getString("dieu_kien_canh_bao")
                     });
                 }
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không đọc được đăng ký theo dõi thời tiết của tài khoản (mã SQL: " + e.getSQLState() + ").");
         }
         return list;
     }
@@ -66,13 +73,14 @@ public class WeatherSubscriptionDAO {
                         String.valueOf(rs.getInt("id")),
                         String.valueOf(rs.getInt("id_tai_khoan")),
                         rs.getString("ten_dia_diem"),
-                        String.valueOf(rs.getDouble("vi_do")),
-                        String.valueOf(rs.getDouble("kinh_do")),
+                        rs.getString("vi_do"),
+                        rs.getString("kinh_do"),
                         rs.getString("dieu_kien_canh_bao")
                 });
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không đọc được danh sách theo dõi thời tiết (mã SQL: "
+                    + e.getSQLState() + "): " + e.getMessage());
         }
         return list;
     }
@@ -84,7 +92,7 @@ public class WeatherSubscriptionDAO {
             ps.setInt(2, userId);
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không xóa được đăng ký theo dõi thời tiết (mã SQL: " + e.getSQLState() + ").");
             return false;
         }
     }

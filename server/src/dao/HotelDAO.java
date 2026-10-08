@@ -33,7 +33,7 @@ public class HotelDAO {
                 }
             }
         } catch (SQLException e) {
-            e.printStackTrace();
+            System.err.println("Không đọc được danh sách khách sạn (mã SQL: " + e.getSQLState() + ").");
         }
         return hotels;
     }

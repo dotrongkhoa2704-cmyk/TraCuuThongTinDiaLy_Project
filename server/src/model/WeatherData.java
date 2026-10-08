@@ -7,6 +7,9 @@ public class WeatherData {
     private String description;
     private double windSpeed;
     private String updatedAt;
+    private boolean fromCache;
+    public boolean isFromCache() { return fromCache; }
+    public void setFromCache(boolean fromCache) { this.fromCache = fromCache; }
 
     public WeatherData() {
     }

@@ -1,0 +1,218 @@
+TÓM TẮT CÁC HẠNG MỤC CẦN SỬA VÀ HOÀN THIỆN ĐỒ ÁN
+Đề tài: Tra cứu thông tin địa lý
+Môn: Lập trình ứng dụng mạng
+
+========================================
+I. CÁC PHẦN BẮT BUỘC CẦN SỬA
+========================================
+
+1. BẢO MẬT MẬT KHẨU
+- Không lưu mật khẩu dạng rõ trong database.
+- Sử dụng BCrypt hoặc PBKDF2 để hash mật khẩu.
+- Khi đăng nhập: lấy hash từ database và kiểm tra mật khẩu.
+- Không gửi password/hash ngược về Client.
+
+2. MÃ HÓA GIAO TIẾP CLIENT - SERVER
+- Hiện tại dữ liệu JSON đang được gửi trực tiếp qua TCP.
+- Cần bổ sung:
+  + RSA để trao đổi khóa phiên.
+  + AES để mã hóa dữ liệu giữa Client và Server.
+  + Mỗi Client sử dụng một AES session key riêng.
+- Nên dùng:
+  + RSA/OAEPWithSHA-256AndMGF1Padding
+  + AES/GCM/NoPadding
+
+3. SỬA CHỨC NĂNG TRA CỨU THÀNH PHỐ
+- Hiện SEARCH_LOCATION đang tìm trong bảng địa điểm đã lưu.
+- Phải sửa thành tra cứu thành phố thật từ API.
+- Kết quả nên có:
+  + Tên thành phố.
+  + Quốc gia.
+  + Tọa độ.
+  + Dân số.
+  + Thời tiết hiện tại.
+  + Khách sạn/địa điểm liên quan.
+- Chỉ lưu vào database khi người dùng bấm "Lưu địa điểm".
+
+4. CẢI TIẾN OPENWEATHER
+- Dùng Geocoding API để lấy latitude/longitude trước.
+- Sau đó dùng latitude/longitude để lấy thời tiết.
+- Không nên chỉ tìm thời tiết trực tiếp bằng tên thành phố.
+- Khi API lỗi hoặc thiếu API key phải báo lỗi rõ ràng.
+- Không tự động trả dữ liệu giả trong bản demo chính thức.
+
+5. CACHE DỮ LIỆU THỜI TIẾT
+- Kiểm tra cache trước khi gọi OpenWeather.
+- Nếu cache còn hiệu lực thì trả dữ liệu từ cache.
+- Nếu hết hạn thì gọi API rồi cập nhật cache.
+- Có thể đặt TTL khoảng 5-10 phút.
+
+6. THÊM CHỨC NĂNG SO SÁNH
+- Đây là yêu cầu bắt buộc.
+- Cho phép so sánh 2 thành phố hoặc 2 quốc gia.
+- Có thể so sánh:
+  + Dân số.
+  + Nhiệt độ.
+  + Độ ẩm.
+  + Gió.
+  + Tiền tệ.
+  + Ngôn ngữ.
+  + Thủ đô.
+  + Các thông tin địa lý khác.
+
+7. THÊM GIAO DIỆN CẬP NHẬT TÀI KHOẢN
+- Server đã có chức năng UPDATE_PROFILE.
+- Client cần thêm giao diện:
+  + Xem thông tin cá nhân.
+  + Cập nhật họ tên.
+  + Cập nhật email.
+  + Có thể thêm đổi mật khẩu.
+  + Đăng xuất.
+
+8. QUẢN LÝ PHIÊN ĐĂNG NHẬP ĐÚNG CÁCH
+- Không tin userId do Client gửi lên.
+- Sau khi đăng nhập, Server lưu currentUserId theo từng ClientHandler.
+- Các chức năng như:
+  + Lịch sử.
+  + Địa điểm đã lưu.
+  + Theo dõi thời tiết.
+  + Lưu địa điểm.
+  phải dùng currentUserId phía Server.
+
+9. THÊM KIỂM TRA DỮ LIỆU ĐẦU VÀO
+- Kiểm tra ở cả Client và Server.
+- Ví dụ:
+  + Username không rỗng, giới hạn độ dài.
+  + Password tối thiểu 8 ký tự.
+  + Email đúng định dạng.
+  + Từ khóa tìm kiếm không rỗng.
+  + Latitude từ -90 đến 90.
+  + Longitude từ -180 đến 180.
+- Server không được tin hoàn toàn dữ liệu từ Client.
+
+10. BẮT BUỘC XÁC THỰC TRƯỚC KHI DÙNG CHỨC NĂNG
+- Chỉ LOGIN và REGISTER được dùng khi chưa đăng nhập.
+- Các chức năng còn lại phải kiểm tra currentUserId.
+- Nếu chưa đăng nhập thì trả lỗi UNAUTHORIZED.
+
+========================================
+II. CÁC PHẦN NÊN HOÀN THIỆN
+========================================
+
+11. THEO DÕI THỜI TIẾT
+- Giữ chức năng server chủ động push cảnh báo.
+- Thêm chức năng "Hủy theo dõi".
+- Quản lý việc gửi dữ liệu về Client tập trung và thread-safe.
+
+12. QUẢN LÝ ĐA LUỒNG
+- Hiện tạo một Thread cho mỗi Client là chấp nhận được.
+- Nên dùng ExecutorService/ThreadPool để:
+  + Quản lý tài nguyên tốt hơn.
+  + Không tạo quá nhiều thread.
+  + Dễ shutdown server.
+
+13. CHẠY CLIENT VÀ SERVER TRÊN HAI MÁY
+- Không hard-code localhost.
+- Đưa IP và port vào file config.
+- Demo:
+  + Máy A chạy Server + MySQL.
+  + Máy B chạy Client.
+  + Kết nối qua LAN.
+
+14. CẢI THIỆN DATABASE
+- Thêm UNIQUE để tránh dữ liệu trùng.
+- Thêm INDEX cho các cột thường truy vấn.
+- Cache nên có:
+  + cache_key.
+  + data_json.
+  + type.
+  + created_at.
+  + expires_at.
+
+15. SỬA LỊCH SỬ TRA CỨU
+- Lưu đúng loại:
+  + thanh_pho.
+  + quoc_gia.
+- Không ghi "(Quốc gia)" trực tiếp vào keyword để phân biệt.
+- Client gửi keyword + type.
+- Database lưu riêng type.
+
+16. CẢI THIỆN TRA CỨU QUỐC GIA
+- Cập nhật REST Countries API nếu phiên bản hiện tại đã cũ.
+- Hiển thị:
+  + Thủ đô.
+  + Dân số.
+  + Tiền tệ.
+  + Ngôn ngữ.
+  + Quốc kỳ.
+  + Quốc gia liền kề.
+- Nên hiển thị ảnh quốc kỳ thay vì chỉ hiển thị URL.
+
+========================================
+III. TÍNH NĂNG ĐIỂM CỘNG NÊN LÀM SAU
+========================================
+
+17. HIỂN THỊ BẢN ĐỒ
+- Hiển thị vị trí thành phố theo latitude/longitude.
+- Có thể dùng OpenStreetMap.
+- Đây là tính năng điểm cộng phù hợp nhất với đề tài.
+
+18. GỢI Ý LỊCH TRÌNH DU LỊCH
+- Nhập địa điểm và số ngày.
+- Server gợi ý các địa điểm theo từng ngày.
+- Không cần thuật toán quá phức tạp.
+
+19. CẢI THIỆN GIAO DIỆN
+- Chuyển sang giao diện rõ ràng hơn:
+  + Thành phố.
+  + Quốc gia.
+  + So sánh.
+  + Yêu thích.
+  + Theo dõi thời tiết.
+  + Lịch sử.
+  + Tài khoản.
+- Hiển thị dữ liệu bằng card/table thay vì chỉ JTextArea.
+
+========================================
+IV. THỨ TỰ NÊN LÀM
+========================================
+
+Ưu tiên theo thứ tự:
+
+1. Hash mật khẩu.
+2. RSA + AES cho Client-Server.
+3. Sửa tra cứu thành phố dùng API thật.
+4. Bổ sung tọa độ, quốc gia, dân số, thời tiết.
+5. Cải tiến cách gọi OpenWeather.
+6. Thêm cache thời tiết.
+7. Thêm giao diện cập nhật tài khoản.
+8. Thêm so sánh 2 thành phố/quốc gia.
+9. Quản lý currentUserId ở Server.
+10. Validation dữ liệu.
+11. Authentication cho các request.
+12. Thêm hủy theo dõi thời tiết.
+13. Cấu hình Client-Server chạy 2 máy LAN.
+14. Cải thiện database và lịch sử.
+15. Nâng cấp giao diện.
+16. Thêm bản đồ.
+17. Nếu còn thời gian: thêm lịch trình du lịch.
+
+========================================
+V. KẾT LUẬN
+========================================
+
+Project hiện tại không cần viết lại từ đầu.
+Nên giữ cấu trúc Client - Server - DAO - MySQL hiện có và tập trung sửa các phần bắt buộc.
+
+Các phần quan trọng nhất cần hoàn thiện trước khi báo cáo:
+- Hash mật khẩu.
+- RSA + AES.
+- Tra cứu thành phố thật.
+- OpenWeather đúng cách.
+- Cache.
+- So sánh thành phố/quốc gia.
+- Quản lý phiên đăng nhập.
+- Validation.
+- Chạy Client và Server trên hai máy khác nhau.
+
+Sau khi hoàn thành các phần trên mới tập trung làm đẹp giao diện và thêm tính năng điểm cộng.
